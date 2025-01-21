@@ -25,9 +25,11 @@ As we can see from the figure above, `matmul` has the highest latency of ....
 
 ## Residual
 
-Residual can be treated as vector addition. The simple kernel implementation is shown below:
+Residual can be treated as vector addition. We have experimented with a few approaches as shown below.
 
 ### Approach 1: Naive Kernel
+
+We start by implementing a simple vector addition kernel.
 
 ```cuda
 __global__ void residual_forward_naive_kernel(float* out, float* inp1, float* inp2, int N) {
@@ -48,7 +50,24 @@ void residual_forward_naive(float* out, float* inp1, float* inp2, int N) {
 
 The above code result in latency of **13.24ms** which is very close to the baseline latency of **12.3ms**. In fact, the baseline implementation is very similar to the above implementation. 
 
-### Approach 2: Vectorized Kernel
+### Approach 2: Cache Hints
+
+One optimization that can be done on approach 1 is using [cache hints](https://docs.nvidia.com/cuda/cuda-c-programming-guide/#store-functions-using-cache-hints). This is the exact impelmentation in the baseline.
+
+```cuda
+__global__ void residual_forward_cache_hint_kernel(float* out, const float* inp1, const float* inp2, int N) {
+    int t = blockDim.x * blockIdx.x + threadIdx.x;
+
+    if (t < N) 
+    {
+      out[t] = __ldcs(&inp1[t]) + __ldcs(&inp2[t]);
+    }
+}
+```
+
+However, using this approach resulted in **13.23ms** which is still **1ms** slower than the baseline approach. We suspect this is cause by the unoptimized kernel that precedes residual kernel.
+
+### Approach 3: Vectorized Kernel
 
 Another approach that we tried was [vectorized memory access](https://developer.nvidia.com/blog/cuda-pro-tip-increase-performance-with-vectorized-memory-access/). 
 
@@ -86,7 +105,7 @@ We would expect the vectorized approach to be more faster, however, we achieved 
 Note that the naive implementation's memory access is already coalesced. Hence, the benefit of using vectorized memory access is for its smaller instruction sizes, which is not the case here. As shown below, there are 3 more iinstructions for `residual_forward_vectorized_kernel` due to the extra 3 additions.
 
 
-```ptx
+```sass
 residual_forward_vectorized_kernel(float*, float const*, float const*, int):
  SHL R6, R0.reuse, 0x4 
  SHR R0, R0, 0x1c 
@@ -120,6 +139,18 @@ residual_forward_naive_kernel(float*, float const*, float const*, int):
 ```
 
 ## Layernorm
+
+![alt text](./images/layernorm/layernorm.png)
+
+Layernorm can be visualize using the image above, where elements of a same row are normalized such that the final mean is 0 and final standard deviation is 1 before going through a transformation. 
+
+### Approach 1: Block Reduction
+
+Since we have to iterate through all elements of a row to find the mean and standard deviation, an intuitive approach is to assign a block to handle a single row.
+
+### Approach 2: Warp Reduction
+
+## Fused Residual and Layernorm
 
 ## Matmul
 
