@@ -100,7 +100,7 @@ layernorm_forward_block_kernel:
  LDG.E.CI R19, [R16]
 ```
 
-This approach took **26.46ms** which is around **2.6%** improvement.
+This approach took **26.46ms** which is around **2.6%** improvement compared to approach 1.
 
 ### Approach 3: [Warp Reduction](https://github.com/GJ0407790/CUDA-GPT2-Inference/blob/main/kernels/layernorm/3_layernorm_warp.cuh)
 
@@ -135,6 +135,10 @@ Kernel fusion has several advantages:
 ![alt text](./images/fused/fused.png)
 
 The implementation can be found in [fused_residual_layernorm.cuh](./kernels/fused_residual_layernorm/fused_residual_layernorm.cuh).
+
+![alt text](./images/fused/fused_comparison.png)
+
+Using this approach resulted in total **10.1ms** which is **2.13x** speedup compared to the sum of residual and layernorm in baseline implementation. Note that there is still 1 instance of layernorm (the first instance) in the fusion appraoch.
 
 ## Matmul
 
