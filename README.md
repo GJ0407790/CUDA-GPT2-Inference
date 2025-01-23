@@ -28,7 +28,7 @@ As we can see from the figure above, `matmul` has the highest latency of ....
 
 Residual can be treated as vector addition. We have experimented with a few approaches as shown below.
 
-### Approach 1: [Naive Kernel](./kernels/residual/1_residual_naive.cuh)
+### Approach 1: [Naive Kernel](https://github.com/GJ0407790/CUDA-GPT2-Inference/blob/main/kernels/residual/1_residual_naive.cuh)
 
 We start by implementing a simple vector addition kernel.
 
@@ -51,7 +51,7 @@ void residual_forward_naive(float* out, float* inp1, float* inp2, int N) {
 
 The above code result in latency of **13.24ms** which is very close to the baseline latency of **12.3ms**. In fact, the baseline implementation is very similar to the above implementation. 
 
-### Approach 2: [Cache Hints](./kernels/residual/2_residual_cache_hint.cuh)
+### Approach 2: [Cache Hints](https://github.com/GJ0407790/CUDA-GPT2-Inference/blob/main/kernels/residual/2_residual_cache_hint.cuh)
 
 One optimization that can be done on approach 1 is using [cache hints](https://docs.nvidia.com/cuda/cuda-c-programming-guide/#store-functions-using-cache-hints). This is the exact impelmentation in the baseline.
 
@@ -74,7 +74,7 @@ However, using this approach resulted in **13.23ms** which is still **1ms** slow
 
 Layernorm can be visualize using the image above, where elements of a same row are normalized such that the final mean is 0 and final standard deviation is 1 before going through a transformation. 
 
-### Approach 1: [Block Reduction](./kernels/layernorm/1_layernorm_block.cuh)
+### Approach 1: [Block Reduction](https://github.com/GJ0407790/CUDA-GPT2-Inference/blob/main/kernels/layernorm/1_layernorm_block.cuh)
 
 Since we have to iterate through all elements of a row to find the mean and standard deviation, an intuitive approach is to assign a block to handle a single row.
 
@@ -84,7 +84,7 @@ Each thread handles 4 elements in a row. For the ease of visualization, the row 
 
 This approach took **27.17ms**, which is **3 times** slower than the baseline approach.
 
-### Approach 2: [Vectorized Block Reduction](./kernels/layernorm/2_layernorm_block_vectorized.cuh)
+### Approach 2: [Vectorized Block Reduction](https://github.com/GJ0407790/CUDA-GPT2-Inference/blob/main/kernels/layernorm/2_layernorm_block_vectorized.cuh)
 
 One small optimization that can be done is [vectorized memory access](https://developer.nvidia.com/blog/cuda-pro-tip-increase-performance-with-vectorized-memory-access/). In this approach, each thread will load 4 consecutive elements using a single load instruction.
 
@@ -111,12 +111,12 @@ Approach 2 has 2 obvious downside:
 
 We can overcome the downside mentioned by letting a single warp to handle a row and communicate using either [cooperative groups](https://docs.nvidia.com/cuda/cuda-c-programming-guide/#cooperative-groups) or [warp shuffle functions](https://docs.nvidia.com/cuda/cuda-c-programming-guide/#warp-shuffle-functions). However, this means that each thread has to handle more elements in a row, in our case, from 4 elements per thread to 24 elements per thread.
 
-
-
 ## Fused Residual and Layernorm
 
 ## Matmul
 
-Matmul at its core is a matrix multiplication. This [article](https://siboehm.com/articles/22/CUDA-MMM) is strongly recommended that shows how to optimize matrix multiplication,
+Matmul at its core is matrix multiplication. This [article](https://siboehm.com/articles/22/CUDA-MMM) is strongly recommended that shows how to optimize matrix multiplication,
 
 ## Attention
+
+![alt text](./images/attention/attention_breakdown.png)
