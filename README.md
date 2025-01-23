@@ -102,16 +102,39 @@ layernorm_forward_block_kernel:
 
 This approach took **26.46ms** which is around **2.6%** improvement.
 
-### Approach 3: Warp Reduction
+### Approach 3: [Warp Reduction](https://github.com/GJ0407790/CUDA-GPT2-Inference/blob/main/kernels/layernorm/3_layernorm_warp.cuh)
 
-Approach 2 has 2 obvious downside:
+Approach 2 has 2 downsides:
 
 1. Atomic contention on 2 shared variables.
 2. `__syncthreads` needed to coordinate the shared variables.
 
-We can overcome the downside mentioned by letting a single warp to handle a row and communicate using either [cooperative groups](https://docs.nvidia.com/cuda/cuda-c-programming-guide/#cooperative-groups) or [warp shuffle functions](https://docs.nvidia.com/cuda/cuda-c-programming-guide/#warp-shuffle-functions). However, this means that each thread has to handle more elements in a row, in our case, from 4 elements per thread to 24 elements per thread.
+We can overcome the downsides mentioned above by letting a single warp to handle a row and communicate using either [cooperative groups](https://docs.nvidia.com/cuda/cuda-c-programming-guide/#cooperative-groups) or [warp shuffle functions](https://docs.nvidia.com/cuda/cuda-c-programming-guide/#warp-shuffle-functions). However, this means that each thread has to handle more elements in a row, in our case, from 4 elements per thread to 24 elements per thread. This will result in higher register pressure since the elements are stored locally as registers.
+
+This approach took **5.1ms** which achieved **5.19x** speedup compared to approach 2. In addition, this is **1.8x** faster than the baseline approach.
+
+![alt text](./images/layernorm/warp_comparison.png)
+
+Looking at the warp states, observed that approach 3 (blue) stalls significantly less than approach 2 (green) in:
+- **Stall Short Scoreboard:** Indicates the contention to shared memory.
+- **Stall Barrier:** Approach 3 has no synchronizations.
+
+However, approach 3 still suffers stalls from long scoreboard which indicates that memory latency from global memory is not well hidden. In other words, approach 3 is memory bound which can be seen in the graph below.
+
+![alt text](./images/layernorm/warp_throughput.png)
 
 ## Fused Residual and Layernorm
+
+If we look at the flow graph in [Introduction](#introduction), we can observe that layernorm kernels are precede with residual kernels, except for the first layernorm kernel. 
+In addition, both residual and layernorm kernels are memory bound, we could potentially merge these 2 kernels into a single kernel. This technique is known as kernel fusion.
+
+Kernel fusion has several advantages:
+- Reduce the number of memory requests to global memory as shown in the image below.
+- Reduce multiple kernel launch overheads into single kernel launch overhead.
+
+![alt text](./images/fused/fused.png)
+
+The implementation can be found in [fused_residual_layernorm.cuh](./kernels/fused_residual_layernorm/fused_residual_layernorm.cuh).
 
 ## Matmul
 
