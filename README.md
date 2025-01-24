@@ -2,27 +2,42 @@
 
 ## Introduction
 
-[TODO:] Introduce GPT2.
+GPT-2 (Generative Pretrained Transformer 2) is a transformer-based language model developed by OpenAI, released in 2019. It is based on transformer which is adopted widely in most of the LLMs nowadays. In this article, we will be focusing on optimizing the runtime for inference stage using a **single A40 Nvidia GPU**.
 
 ![alt text](./images/gpt2/gpt2_flow.png)
 
 The image above shows the flow of the inference step:
-- `encoder`:
-- `layernorm`:
-- `matmul`:
-- `attention`:
-- `residual`:
-- `gelu`:
-
-All of the experiments are done using a single A40 Nvidia GPU.
+- `encoder`: Converts the input data into a compact, meaningful representation.
+- `layernorm`: Helps stabilize the outputs of the model by keeping the outputs well-scaled.
+- `matmul`: Performs matrix multiplication to transform inputs using learned weights, essentially a fully connected layer.
+- `attention`: Assigns dynamic weights to different parts of the input, allowing the model to focus on relevant information for better understanding.
+- `residual`: Preserves information from previous layers while adding new information from subsequent layers.
+- `gelu`: Introduces non-linearity into the model, allowing it to capture more complex patterns and make creative inferences.
 
 ## Baseline
 
-We will use Karpathy's [llm.c](https://github.com/karpathy/llm.c) as the baseline of our optimizations. Specifically, `train_gpt2_fp32.cu` is the code that we ran as the baseline.
+We will use Karpathy's [llm.c](https://github.com/karpathy/llm.c) as the baseline of our optimizations. Specifically, `train_gpt2_fp32.cu` is the code that we ran as the baseline. Note that `train_gpt2_fp32.cu` is not the most optimized implementation, however, the reason the we chose this to be the baseline is to employ 32 bit floating precision.
 
 ![alt text](./images/llmc/llmc_breakdown.png)
 
-As we can see from the figure above, `matmul` has the highest latency of ....
+As we can see from the figure above, inference stage spent most of the time in `matmul` followed by `attention`. Hence, optimizing these 2 kernels can affect the overall runtime the most.
+
+## Matmul
+ 
+![alt text](./images/matmul/matmul_flow.png)
+
+Matmul at its core is matrix multiplication. The baseline implementation uses 2D block tiling for matrix multiplication.This [article](https://siboehm.com/articles/22/CUDA-MMM) provides a good step-by-step guide to optimize matrix multiplication.
+
+### Appraoch 1: [Tensor Cores](https://github.com/GJ0407790/CUDA-GPT2-Inference/blob/main/kernels/matmul/1_matmul_tensor.cuh)
+
+Tensor core is a piece of hardware that specializes in matrix multiplication and provides a huge performance boost compared to the traditional ALU.
+
+
+This approach utilizes tensor cores and it took **82.4ms** which is **6.8x** speedup compared to the baseline implementation.
+
+### Approach 2: Cutlass
+
+[TODO:] Look into cutlass.
 
 ## Residual
 
@@ -139,10 +154,6 @@ The implementation can be found in [fused_residual_layernorm.cuh](./kernels/fuse
 ![alt text](./images/fused/fused_comparison.png)
 
 Using this approach resulted in total **10.1ms** which is **2.13x** speedup compared to the sum of residual and layernorm in baseline implementation. Note that there is still 1 instance of layernorm (the first instance) in the fusion appraoch.
-
-## Matmul
-
-Matmul at its core is matrix multiplication. This [article](https://siboehm.com/articles/22/CUDA-MMM) is strongly recommended that shows how to optimize matrix multiplication,
 
 ## Attention
 
