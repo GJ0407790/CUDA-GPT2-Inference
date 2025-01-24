@@ -30,8 +30,29 @@ Matmul at its core is matrix multiplication. The baseline implementation uses 2D
 
 ### Appraoch 1: [Tensor Cores](https://github.com/GJ0407790/CUDA-GPT2-Inference/blob/main/kernels/matmul/1_matmul_tensor.cuh)
 
-Tensor core is a piece of hardware that specializes in matrix multiplication and provides a huge performance boost compared to the traditional ALU.
+Tensor core is a piece of hardware that specializes in matrix multiplication and provides a huge performance boost compared to the traditional ALU. CUDA provides [warp matrix functions](https://docs.nvidia.com/cuda/cuda-c-programming-guide/) to operate on tensor cores. The code below shows how warp matrix functions were used to compute the matrix multiplication.
 
+```cuda
+// fragments
+wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, wmma::precision::tf32, wmma::row_major> inp_frag;
+wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, wmma::precision::tf32, wmma::col_major> weight_frag; // col_major because transposed
+wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> out_frag;
+// initialize the output fragment
+wmma::fill_fragment(out_frag, 0.0f);
+
+for (int k = 0; k < C; k += WMMA_K)
+{
+  wmma::load_matrix_sync(inp_frag, inp, C);
+  wmma::load_matrix_sync(weight_frag, weight, C);
+  wmma::mma_sync(out_frag, inp_frag, weight_frag, out_frag);
+
+  inp += k;
+  weight += k;
+}
+
+// load back to shared memory
+wmma::store_matrix_sync(&out_ins[0][0], out_frag, WMMA_N, wmma::mem_row_major);
+```
 
 This approach utilizes tensor cores and it took **82.4ms** which is **6.8x** speedup compared to the baseline implementation.
 
