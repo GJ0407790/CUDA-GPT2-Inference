@@ -92,7 +92,7 @@ In the code, a block only launches 1 warp and handles $16 \times 16$ output tile
 
 This demonstrates the efficiency of tensor cores. In the next step, we try to increase the occupancy and data reuse by using PTX.
 
-### Approach 4: [MMA PTX Instructions]
+### Approach 4: [MMA PTX Instructions](https://github.com/GJ0407790/CUDA-GPT2-Inference/blob/main/kernels/matmul/4_matmul_ptx.cuh)
 
 **PTX**
 
