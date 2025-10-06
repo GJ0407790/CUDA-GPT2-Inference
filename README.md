@@ -92,6 +92,65 @@ In the code, a block only launches 1 warp and handles $16 \times 16$ output tile
 
 This demonstrates the efficiency of tensor cores. In the next step, we try to increase the occupancy and data reuse by using PTX.
 
+### Approach 4: [MMA PTX Instructions]
+
+**PTX**
+
+PTX is a stable ISA similar to assembly that can be used directly to program GPU. Many of the advance features are exposed only through PTX, e.g. latest mma instructions and TMA.
+
+In Ampere, the `mma` instructions are called [SuperMMA](https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-instructions-for-mma). Below shows the `mma` instruction for `bf16` of shape `m16-n8-k16`.
+
+```cuda
+__device__ __forceinline__ void mma_m16n8k16(
+  Reg32 const& a0, Reg32 const& a1, Reg32 const& a2, Reg32 const& a3,
+  Reg32 const& b0, Reg32 const& b1,
+  float& c0, float& c1, float& c2, float& c3
+)
+{
+  asm volatile(
+    "mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 "
+    "{%0,  %1,  %2,  %3},"
+    "{%4,  %5,  %6,  %7},"
+    "{%8,  %9},"
+    "{%10, %11, %12, %13};\n"
+    : "=f"(c0), "=f"(c1), "=f"(c2), "=f"(c3)
+    :  "r"(a0),  "r"(a1),  "r"(a2),  "r"(a3),
+       "r"(b0),  "r"(b1),
+       "f"(c0),  "f"(c1),  "f"(c2),  "f"(c3)
+  );
+}
+```
+
+**BF16**
+
+For the matrix multiplication, we decided to go with [`bf16`](https://en.wikipedia.org/wiki/Bfloat16_floating-point_format) data type which can achieves 2x more throughput compared to using `tf32` on tensor cores. Also, the error when operating on `M512-N512-K128` is less than $0.2\%$.
+
+The conversion from `float` to `bf16` is done using `__nv_bfloat16(float)`.
+
+**Implementation**
+
+The implementation is layout as follows:
+
+![alt text](./images/matmul/ptx_layout.png)
+
+There are 3 hyperparameters that we can play with, namely `BM, BN, BK`. The table below shows the total latency of varying `BM, BN` while keeping `BK=16`.
+
+![alt text](./images/matmul/bm_bn_ptx.png)
+
+In general, the latency can be improved when `BM` or `BN` is increased, due to:
+  - A warp handles 16 rows, hence increase in `BM` results in more warps. This can improve the occupancy and allows better latency hiding.
+  - Increase in `BN` can improve the arithmetic intensity as the same input tile multiplies with multiple weight tiles.
+
+The results of the `m16-n8-k16 mma` is stored as follows in register. 
+
+![alt text](./images/matmul/mma_result.png)
+
+Note that, for every 8 columns, each thread will need additional 4 registers to store the result. Hence, having a high `BN` will increase the register pressure,
+
+**Result**
+
+Using PTX results in **320.6ms**, which is **1.75x** faster than the baseline but still slower than the `cuBLAS` approach.
+
 ## Residual
 
 Residual can be treated as vector addition. We have experimented with a few approaches as shown below.
