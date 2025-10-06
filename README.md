@@ -26,11 +26,43 @@ As we can see from the figure above, inference stage spent most of the time in `
  
 ![alt text](./images/matmul/matmul_flow.png)
 
-Matmul at its core is matrix multiplication. The baseline implementation uses 2D block tiling for matrix multiplication.This [article](https://siboehm.com/articles/22/CUDA-MMM) provides a good step-by-step guide to optimize matrix multiplication.
+Matmul at its core is matrix multiplication.
 
-### Appraoch 1: [Tensor Cores](https://github.com/GJ0407790/CUDA-GPT2-Inference/blob/main/kernels/matmul/1_matmul_tensor.cuh)
+### Approach 1: [Tiling](https://github.com/GJ0407790/CUDA-GPT2-Inference/blob/main/kernels/matmul/1_matmul_tiling.cuh)
 
-Tensor core is a piece of hardware that specializes in matrix multiplication and provides a huge performance boost compared to the traditional ALU. CUDA provides [warp matrix functions](https://docs.nvidia.com/cuda/cuda-c-programming-guide/) to operate on tensor cores. The code below shows how warp matrix functions were used to compute the matrix multiplication.
+We first implemented matmul using basic 2D block tiling.
+
+> This [article](https://siboehm.com/articles/22/CUDA-MMM) provides a good step-by-step guide to optimize matrix multiplication.
+
+Using tile width of 16 result in total **8,337.43ms** which is **14.9x** times slower than baseline.
+
+### Approach 2: [cuBLAS](https://github.com/GJ0407790/CUDA-GPT2-Inference/blob/main/kernels/matmul/3_matmul_cublas.cuh)
+
+[cuBLAS](developer.nvidia.com/cublas) is a GPU-accelerated library by NVIDIA for linear operations. cuBLAS uses various functions by [CUTLASS](https://github.com/NVIDIA/cutlass) underneath.
+
+```cuda
+cublasOperation_t transa = CUBLAS_OP_T;
+cublasOperation_t transb = CUBLAS_OP_N;
+float alpha = 1.0f;
+float beta = 0.0f;
+cublasSgemm_v2(cublas_handle, transa, transb, OC, B*T, C, &alpha, weight, C, inp, C, &beta, out, OC);
+
+if (bias != nullptr) 
+{
+  add_bias(out, bias, B, T, OC);
+}
+```
+Because the bias is just a vector, we either have to:
+  1. Duplicate it into a 2D matrix with the same shape as output and pass in the bias matrix as accumulator.
+  2. Use `cublasSgemm_v2` just for the matrix multiplication and launch another kernel to do row-wise addition.
+
+In the end, the second appraoch is more efficient. The total latency (for both matmul and add bias) is **200.24ms** which is **2.8x** faster than the baseline.
+
+### Approach 3: [Tensor Cores](https://github.com/GJ0407790/CUDA-GPT2-Inference/blob/main/kernels/matmul/3_matmul_tensor.cuh)
+
+To understand how cuBLAS achieves such amazing speedup, we decided to dive in the details to see its implementation. 
+
+First, it utilizes tensor core, which is a piece of hardware that specializes in matrix multiplication and provides a huge performance boost compared to the traditional ALU. CUDA provides [warp matrix functions](https://docs.nvidia.com/cuda/cuda-c-programming-guide/) to operate on tensor cores. The code below shows how warp matrix functions were used to compute the matrix multiplication.
 
 ```cuda
 // fragments
@@ -54,11 +86,11 @@ for (int k = 0; k < C; k += WMMA_K)
 wmma::store_matrix_sync(&out_ins[0][0], out_frag, WMMA_N, wmma::mem_row_major);
 ```
 
-This approach utilizes tensor cores and it took **82.4ms** which is **6.8x** speedup compared to the baseline implementation.
+> Note that we still have to add the bias by loading out_frag from shared memory to register.
 
-### Approach 2: Cutlass
+In the code, a block only launches 1 warp and handles $16 \times 16$ output tile. It has low occupancy and low arithmetic intensity. However, it still results in total latency of **2,213.13ms** which is **much slower than baseline** but **3.75x** faster than the tiling approach.
 
-[TODO:] Look into cutlass.
+This demonstrates the efficiency of tensor cores. In the next step, we try to increase the occupancy and data reuse by using PTX.
 
 ## Residual
 
